@@ -50,10 +50,18 @@ def test_full_process():
         "invitation_code": invitation_code
     }
     
-    response = requests.post(f"{base_url}/register", json=register_data)
-    print(f"Status: {response.status_code}")
-    user_token = response.json()["access_token"]
-    print("Compte créé et token obtenu")
+    try:
+        response = requests.post(f"{base_url}/register", json=register_data)
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.text}")
+        
+        if response.status_code != 200:
+            raise Exception(f"Échec de l'inscription: {response.text}")
+            
+        user_token = response.json()["access_token"]
+        print("Compte créé et token obtenu")
+    except Exception as e:
+        raise Exception(f"Erreur lors de l'inscription: {str(e)}")
     
     # 4. Récupérer les informations de l'utilisateur (notamment son voter_id)
     print("\n=== 4. Récupération infos utilisateur ===")

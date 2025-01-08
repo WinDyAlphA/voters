@@ -26,7 +26,7 @@ app.add_middleware(
 )
 
 # Initialisation de la base de données
-db = VotingDatabase("backend/voting.db")
+db = VotingDatabase("/app/data/voting.db")
 
 # Configuration de la sécurité
 SECRET_KEY = "votre_clé_secrète_très_longue_et_complexe"  # À changer en production
@@ -94,7 +94,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except jwt.JWTError:
         raise credentials_exception
         
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     cursor.execute("SELECT id, username, email FROM users WHERE username = ?", (username,))
     user = cursor.fetchone()
@@ -154,7 +154,7 @@ async def root():
 @app.get("/elections")
 async def get_elections():
     """Récupère la liste des élections"""
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -180,7 +180,7 @@ async def get_elections():
 @app.get("/elections/{election_id}/candidates")
 async def get_candidates(election_id: int):
     """Récupère la liste des candidats pour une élection"""
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -207,7 +207,7 @@ async def submit_vote(vote: Vote):
     if db.has_voter_voted(vote.election_id, vote.voter_id):
         raise HTTPException(status_code=400, detail="Vous avez déjà voté pour cette élection")
     
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -262,7 +262,7 @@ async def submit_vote(vote: Vote):
 @app.get("/elections/{election_id}/status")
 async def get_election_status(election_id: int):
     """Récupère le statut d'une élection et les résultats si elle est terminée"""
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -295,7 +295,7 @@ async def get_election_status(election_id: int):
 @app.post("/register", response_model=Token)
 async def register_user(user: UserCreate):
     """Enregistrement d'un nouvel utilisateur"""
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -316,6 +316,8 @@ async def register_user(user: UserCreate):
         """, (user.invitation_code,))
         
         invitation = cursor.fetchone()
+        print(f"Code d'invitation trouvé: {invitation}")  # Debug
+        
         if not invitation:
             raise HTTPException(
                 status_code=400,
@@ -330,44 +332,60 @@ async def register_user(user: UserCreate):
         
         # Générer un voter_id unique
         voter_id = generate_voter_id()
+        print(f"Voter ID généré: {voter_id}")  # Debug
         
         # Hasher le mot de passe
         hashed_password = get_password_hash(user.password)
         
-        # Insérer le nouvel utilisateur avec son voter_id
-        cursor.execute("""
-            INSERT INTO users (username, email, password_hash, voter_id)
-            VALUES (?, ?, ?, ?)
-        """, (user.username, user.email, hashed_password, voter_id))
-        
-        user_id = cursor.lastrowid
-        
-        # Marquer le code d'invitation comme utilisé
-        cursor.execute("""
-            UPDATE invitation_codes 
-            SET used = TRUE, 
-                used_at = CURRENT_TIMESTAMP,
-                used_by = ?
-            WHERE id = ?
-        """, (user_id, invitation[0]))
-        
-        conn.commit()
-        
-        # Créer le token d'accès
-        access_token = create_access_token(
-            data={"sub": user.username}
-        )
-        return {"access_token": access_token, "token_type": "bearer"}
-        
+        try:
+            # Insérer le nouvel utilisateur avec son voter_id
+            cursor.execute("""
+                INSERT INTO users (username, email, password_hash, voter_id)
+                VALUES (?, ?, ?, ?)
+            """, (user.username, user.email, hashed_password, voter_id))
+            
+            user_id = cursor.lastrowid
+            print(f"Utilisateur créé avec ID: {user_id}")  # Debug
+            
+            # Marquer le code d'invitation comme utilisé
+            cursor.execute("""
+                UPDATE invitation_codes 
+                SET used = TRUE, 
+                    used_at = CURRENT_TIMESTAMP,
+                    used_by = ?
+                WHERE id = ?
+            """, (user_id, invitation[0]))
+            
+            conn.commit()
+            
+            # Créer le token d'accès
+            access_token = create_access_token(
+                data={"sub": user.username}
+            )
+            return {"access_token": access_token, "token_type": "bearer"}
+            
+        except sqlite3.IntegrityError as e:
+            conn.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Database error: {str(e)}"
+            )
+            
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        print(f"Erreur lors de l'inscription: {str(e)}")  # Debug
+        raise HTTPException(
+            status_code=400,
+            detail=f"Registration error: {str(e)}"
+        )
     finally:
         conn.close()
 
 @app.post("/login", response_model=Token)
 async def login_json(user: UserLogin):
     """Login utilisateur avec JSON"""
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -405,7 +423,7 @@ async def login_json(user: UserLogin):
 @app.get("/users/me")
 async def read_users_me(current_user = Depends(get_current_user)):
     """Récupère les informations de l'utilisateur connecté"""
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -426,7 +444,7 @@ async def generate_invitation(current_user: dict = Depends(get_current_user)):
     alphabet = string.ascii_letters + string.digits
     code = ''.join(secrets.choice(alphabet) for _ in range(32))
     
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -461,7 +479,7 @@ async def list_invitation_codes(current_user: dict = Depends(get_current_user)):
             detail="Only administrators can view invitation codes"
         )
     
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -496,7 +514,7 @@ async def get_encrypted_votes(
             detail="Only administrators can access encrypted votes"
         )
     
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -525,7 +543,7 @@ async def get_election_results(
             detail="Only administrators can access election results"
         )
     
-    conn = sqlite3.connect("backend/voting.db")
+    conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
@@ -550,7 +568,7 @@ async def get_election_results(
         candidates = cursor.fetchall()
         
         # Charger la clé secrète
-        with open("backend/election_keys.json", "r") as f:
+        with open("/app/data/election_keys.json", "r") as f:
             keys = json.load(f)
             secret_key = int(keys["secret_key"], 16)
         

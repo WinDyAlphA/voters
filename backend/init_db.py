@@ -64,10 +64,10 @@ def create_admin_user(db_path: str):
 
 def init_database():
     """Initialise la base de données avec la structure minimale"""
-    db = VotingDatabase("backend/voting.db")
+    db = VotingDatabase("/app/data/voting.db")
     
     # Créer l'utilisateur admin
-    create_admin_user("backend/voting.db")
+    create_admin_user("/app/data/voting.db")
     
     # Génération d'une paire de clés pour l'élection
     sk, pk = EC_KeyGen()
@@ -95,7 +95,7 @@ def init_database():
     for name, description in candidates:
         db.add_candidate(election_id, name, description)
     
-    # Sauvegarder les clés pour le décompte ultérieur
+    # Sauvegarder les clés
     keys = {
         "secret_key": hex(sk),
         "public_key": {
@@ -103,7 +103,7 @@ def init_database():
             "y": hex(pk[1])
         }
     }
-    with open("backend/election_keys.json", "w") as f:
+    with open("/app/data/election_keys.json", "w") as f:
         json.dump(keys, f, indent=4)
     
     print("\n=== Initialisation de la base de données terminée ===")

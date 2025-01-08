@@ -2,8 +2,8 @@ import sqlite3
 from datetime import datetime
 
 class VotingDatabase:
-    def __init__(self, db_file="voting.db"):
-        self.db_file = db_file
+    def __init__(self, db_file):
+        self.db_file = "/app/data/voting.db"  # Chemin fixe dans Docker
         self.init_database()
 
     def init_database(self):
@@ -58,6 +58,17 @@ class VotingDatabase:
             c_x TEXT NOT NULL,
             c_y TEXT NOT NULL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (election_id) REFERENCES elections(id)
+        )
+        ''')
+
+        #tables des voters
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS voters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            election_id INTEGER,
+            voter_id TEXT UNIQUE NOT NULL,
+            has_voted BOOLEAN DEFAULT FALSE,
             FOREIGN KEY (election_id) REFERENCES elections(id)
         )
         ''')
