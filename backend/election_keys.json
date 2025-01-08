@@ -1,0 +1,7 @@
+{
+    "secret_key": "0x46832d7a4a94f56ac4d04eecb6ebef7d3bf100f39ffc107c9fab4f9419ea3330",
+    "public_key": {
+        "x": "0xcc55deb7f9de87df774f54d6d0de116598dc71ecd5f814f63947954353ddafb",
+        "y": "0x63f6effd248486ac486bd4fb36340656b309877ccbfc154cf3dc71ed7df16c1c"
+    }
+}
