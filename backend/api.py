@@ -4,7 +4,8 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from datetime import datetime, timedelta
 from database import VotingDatabase
-from ecelgamal import EC_KeyGen, EC_Encrypt
+from ecelgamal import EC_KeyGen, EC_Encrypt, EC_Decrypt, bruteECLog, p
+from rfc7748 import add
 import sqlite3
 import json
 from jose import jwt
@@ -107,6 +108,44 @@ def generate_voter_id():
     """Génère un voter_id unique de 32 caractères"""
     alphabet = string.ascii_letters + string.digits
     return 'voter_' + ''.join(secrets.choice(alphabet) for _ in range(32))
+
+def count_votes(election_id, secret_key, nb_candidates, encrypted_votes):
+    """Compte les votes pour chaque candidat en utilisant la clé secrète"""
+    # Initialiser les compteurs pour chaque candidat
+    vote_counts = [0] * nb_candidates
+    
+    # Regrouper les votes par candidat
+    votes_by_candidate = {}
+    for i in range(nb_candidates):
+        votes_by_candidate[i] = []
+    
+    # Organiser les votes chiffrés par candidat
+    for i in range(0, len(encrypted_votes), nb_candidates):
+        for j in range(nb_candidates):
+            if i + j < len(encrypted_votes):
+                vote = encrypted_votes[i + j]
+                votes_by_candidate[j].append(vote)
+    
+    # Déchiffrer et compter les votes pour chaque candidat
+    for candidate_id, candidate_votes in votes_by_candidate.items():
+        if not candidate_votes:
+            continue
+            
+        r_sum = (int(candidate_votes[0][0], 16), int(candidate_votes[0][1], 16))
+        c_sum = (int(candidate_votes[0][2], 16), int(candidate_votes[0][3], 16))
+        
+        for vote in candidate_votes[1:]:
+            r = (int(vote[0], 16), int(vote[1], 16))
+            c = (int(vote[2], 16), int(vote[3], 16))
+            r_sum = add(r_sum[0], r_sum[1], r[0], r[1], p)
+            c_sum = add(c_sum[0], c_sum[1], c[0], c[1], p)
+        
+        # Déchiffrer la somme
+        decrypted_sum_point = EC_Decrypt(r_sum, c_sum, secret_key)
+        vote_count = bruteECLog(decrypted_sum_point)
+        vote_counts[candidate_id] = vote_count
+    
+    return vote_counts
 
 @app.get("/")
 async def root():
@@ -470,6 +509,61 @@ async def get_encrypted_votes(
         
         votes = cursor.fetchall()
         return votes
+        
+    finally:
+        conn.close()
+
+@app.get("/elections/{election_id}/results")
+async def get_election_results(
+    election_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """Récupère et déchiffre les résultats d'une élection (admin seulement)"""
+    if current_user["id"] != 1:
+        raise HTTPException(
+            status_code=403,
+            detail="Only administrators can access election results"
+        )
+    
+    conn = sqlite3.connect("backend/voting.db")
+    cursor = conn.cursor()
+    
+    try:
+        # Récupérer les votes chiffrés
+        cursor.execute("""
+            SELECT r_x, r_y, c_x, c_y
+            FROM encrypted_votes
+            WHERE election_id = ?
+            ORDER BY id ASC
+        """, (election_id,))
+        
+        encrypted_votes = cursor.fetchall()
+        
+        # Récupérer les candidats
+        cursor.execute("""
+            SELECT id, name
+            FROM candidates
+            WHERE election_id = ?
+            ORDER BY id ASC
+        """, (election_id,))
+        
+        candidates = cursor.fetchall()
+        
+        # Charger la clé secrète
+        with open("backend/election_keys.json", "r") as f:
+            keys = json.load(f)
+            secret_key = int(keys["secret_key"], 16)
+        
+        # Compter les votes
+        vote_counts = count_votes(election_id, secret_key, len(candidates), encrypted_votes)
+        
+        # Préparer les résultats
+        results = [{
+            "candidate_name": candidates[i][1],
+            "votes": count
+        } for i, count in enumerate(vote_counts)]
+        
+        return results
         
     finally:
         conn.close()

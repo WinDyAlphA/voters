@@ -48,17 +48,6 @@ class VotingDatabase:
         )
         ''')
 
-        # Table des votants autorisés
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS voters (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            election_id INTEGER,
-            voter_id TEXT UNIQUE NOT NULL,
-            has_voted BOOLEAN DEFAULT FALSE,
-            FOREIGN KEY (election_id) REFERENCES elections(id)
-        )
-        ''')
-
         # Table des votes chiffrés
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS encrypted_votes (

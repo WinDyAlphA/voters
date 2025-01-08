@@ -1,7 +1,7 @@
 {
-    "secret_key": "0x46832d7a4a94f56ac4d04eecb6ebef7d3bf100f39ffc107c9fab4f9419ea3330",
+    "secret_key": "0x78df6640a20a145c2ba15ffd98f35cb4199b0d698951e93e3c443ad5fa3c1354",
     "public_key": {
-        "x": "0xcc55deb7f9de87df774f54d6d0de116598dc71ecd5f814f63947954353ddafb",
-        "y": "0x63f6effd248486ac486bd4fb36340656b309877ccbfc154cf3dc71ed7df16c1c"
+        "x": "0x2edd1e8dc073ebc56767f062c35fc92dca21cf31046cf2d451b5980baa834d9c",
+        "y": "0x5d37ccd99921fd26100e533984051ce87be804cb04fd6a9cee230496d0617039"
     }
 }
