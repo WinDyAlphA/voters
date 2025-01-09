@@ -109,41 +109,47 @@ def generate_voter_id():
     alphabet = string.ascii_letters + string.digits
     return 'voter_' + ''.join(secrets.choice(alphabet) for _ in range(32))
 
-def count_votes(election_id, secret_key, nb_candidates, encrypted_votes):
-    """Compte les votes pour chaque candidat en utilisant la clé secrète"""
-    # Initialiser les compteurs pour chaque candidat
-    vote_counts = [0] * nb_candidates
+def count_votes(election_id, secret_key, encrypted_votes):
+    """Compte les votes en utilisant la propriété homomorphique d'El Gamal
+    Pour chaque position i du vecteur (0-4), additionne tous les votes chiffrés
+    à cette position, puis déchiffre la somme pour obtenir le nombre total de votes
+    pour le candidat i.
+    """
+    # Initialiser les compteurs pour les 5 candidats
+    vote_counts = [0] * 5
     
-    # Regrouper les votes par candidat
-    votes_by_candidate = {}
-    for i in range(nb_candidates):
-        votes_by_candidate[i] = []
+    # Regrouper les votes par position dans le vecteur
+    votes_by_position = {i: [] for i in range(5)}
     
-    # Organiser les votes chiffrés par candidat
-    for i in range(0, len(encrypted_votes), nb_candidates):
-        for j in range(nb_candidates):
-            if i + j < len(encrypted_votes):
-                vote = encrypted_votes[i + j]
-                votes_by_candidate[j].append(vote)
+    # Organiser les votes chiffrés (chaque vote génère 5 chiffrements)
+    for i in range(0, len(encrypted_votes), 5):
+        for pos in range(5):
+            if i + pos < len(encrypted_votes):
+                vote = encrypted_votes[i + pos]
+                votes_by_position[pos].append(vote)
     
-    # Déchiffrer et compter les votes pour chaque candidat
-    for candidate_id, candidate_votes in votes_by_candidate.items():
-        if not candidate_votes:
+    # Pour chaque position, additionner les votes chiffrés et déchiffrer la somme
+    for position, encrypted_values in votes_by_position.items():
+        if not encrypted_values:
             continue
             
-        r_sum = (int(candidate_votes[0][0], 16), int(candidate_votes[0][1], 16))
-        c_sum = (int(candidate_votes[0][2], 16), int(candidate_votes[0][3], 16))
+        # Commencer avec le premier vote chiffré
+        r_sum = (int(encrypted_values[0][0], 16), int(encrypted_values[0][1], 16))
+        c_sum = (int(encrypted_values[0][2], 16), int(encrypted_values[0][3], 16))
         
-        for vote in candidate_votes[1:]:
+        # Additionner les votes chiffrés suivants (propriété homomorphique)
+        for vote in encrypted_values[1:]:
             r = (int(vote[0], 16), int(vote[1], 16))
             c = (int(vote[2], 16), int(vote[3], 16))
+            # Addition homomorphique sur la courbe elliptique
             r_sum = add(r_sum[0], r_sum[1], r[0], r[1], p)
             c_sum = add(c_sum[0], c_sum[1], c[0], c[1], p)
         
         # Déchiffrer la somme
         decrypted_sum_point = EC_Decrypt(r_sum, c_sum, secret_key)
+        # Convertir le point en nombre (logarithme discret)
         vote_count = bruteECLog(decrypted_sum_point)
-        vote_counts[candidate_id] = vote_count
+        vote_counts[position] = vote_count
     
     return vote_counts
 
@@ -202,16 +208,21 @@ async def get_candidates(election_id: int):
 
 @app.post("/vote")
 async def submit_vote(vote: Vote):
-    """Soumet un vote pour une élection"""
-    # Vérification que l'électeur n'a pas déjà voté
+    """Soumet un vote pour une élection
+    Pour un vote pour le candidat i, crée un vecteur de 5 valeurs (0 ou 1)
+    où seule la position i contient 1. Chaque valeur est chiffrée séparément.
+    """
     if db.has_voter_voted(vote.election_id, vote.voter_id):
         raise HTTPException(status_code=400, detail="Vous avez déjà voté pour cette élection")
+    
+    if not (0 <= vote.chosen_candidate <= 4):
+        raise HTTPException(status_code=400, detail="Candidat invalide (doit être entre 0 et 4)")
     
     conn = sqlite3.connect("/app/data/voting.db")
     cursor = conn.cursor()
     
     try:
-        # Récupération de la clé publique de l'élection
+        # Récupérer la clé publique
         cursor.execute("""
             SELECT public_key_x, public_key_y 
             FROM elections 
@@ -222,25 +233,18 @@ async def submit_vote(vote: Vote):
         if not key_data:
             raise HTTPException(status_code=404, detail="Élection non trouvée")
         
-        # Conversion des clés publiques de hex string vers int
         pk = (int(key_data[0], 16), int(key_data[1], 16))
         
-        # Récupération du nombre de candidats
-        cursor.execute("SELECT COUNT(*) FROM candidates WHERE election_id = ?", (vote.election_id,))
-        nb_candidates = cursor.fetchone()[0]
+        # Créer et chiffrer le vecteur de vote [0,0,0,0,0] avec un 1 à la position choisie
+        vote_vector = [1 if i == vote.chosen_candidate else 0 for i in range(5)]
+        encrypted_votes = []
         
-        if vote.chosen_candidate >= nb_candidates:
-            raise HTTPException(status_code=400, detail="Candidat invalide")
-        
-        # Création d'un vote chiffré pour chaque candidat
-        for candidate_index in range(nb_candidates):
-            # 1 pour le candidat choisi, 0 pour les autres
-            vote_value = 1 if candidate_index == vote.chosen_candidate else 0
+        # Chiffrer chaque composante du vecteur séparément
+        for value in vote_vector:
+            r, c = EC_Encrypt(value, pk)
+            encrypted_votes.append((r, c))
             
-            # Chiffrement du vote
-            r, c = EC_Encrypt(vote_value, pk)
-            
-            # Stockage du vote chiffré
+            # Stocker le vote chiffré
             db.store_vote(
                 vote.election_id,
                 str(hex(r[0])),
@@ -252,7 +256,16 @@ async def submit_vote(vote: Vote):
         # Marquer l'électeur comme ayant voté
         db.mark_voter_as_voted(vote.election_id, vote.voter_id)
         
-        return {"message": "Vote enregistré avec succès"}
+        return {
+            "message": "Vote enregistré avec succès",
+            "vote_vector": vote_vector,
+            "encrypted_votes": [
+                {
+                    "r": (hex(r[0]), hex(r[1])),
+                    "c": (hex(c[0]), hex(c[1]))
+                } for r, c in encrypted_votes
+            ]
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors du vote: {str(e)}")
@@ -559,13 +572,19 @@ async def get_election_results(
         
         # Récupérer les candidats
         cursor.execute("""
-            SELECT id, name
+            SELECT name
             FROM candidates
             WHERE election_id = ?
             ORDER BY id ASC
         """, (election_id,))
         
-        candidates = cursor.fetchall()
+        candidates = [row[0] for row in cursor.fetchall()]
+        
+        if len(candidates) != 5:
+            raise HTTPException(
+                status_code=400,
+                detail="Cette élection n'a pas exactement 5 candidats"
+            )
         
         # Charger la clé secrète
         with open("/app/data/election_keys.json", "r") as f:
@@ -573,11 +592,11 @@ async def get_election_results(
             secret_key = int(keys["secret_key"], 16)
         
         # Compter les votes
-        vote_counts = count_votes(election_id, secret_key, len(candidates), encrypted_votes)
+        vote_counts = count_votes(election_id, secret_key, encrypted_votes)
         
         # Préparer les résultats
         results = [{
-            "candidate_name": candidates[i][1],
+            "candidate_name": candidates[i],
             "votes": count
         } for i, count in enumerate(vote_counts)]
         

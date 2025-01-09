@@ -85,11 +85,13 @@ def init_database():
         public_key_y=str(hex(pk[1]))
     )
     
-    # Ajout des trois candidats
+    # Ajout des cinq candidats
     candidates = [
-        ("Alice Martin", "Candidate #1"),
-        ("Bob Dupont", "Candidate #2"),
-        ("Charlie Garcia", "Candidate #3")
+        ("Candidat C1", "Premier candidat"),
+        ("Candidat C2", "Deuxième candidat"),
+        ("Candidat C3", "Troisième candidat"),
+        ("Candidat C4", "Quatrième candidat"),
+        ("Candidat C5", "Cinquième candidat")
     ]
     
     for name, description in candidates:
